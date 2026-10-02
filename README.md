@@ -69,7 +69,7 @@ A három havi összeghez minden új, még fel nem dolgozott számlatétel egysze
 - **Tisztázva:** CSV szerinti dátum, tartós év–bizonylatszám kulcs, több éves import, minden beszerzési csoport, trailer számlaszűrés nélkül, a három külön számlás cikkszám és a reset hatóköre.
 - Az eredeti mintanap és reprezentatív bizonylatai összesítését ellenőriztük. Elkészültek a fiktív többnapos, többhónapos és többéves CSV-k; várt nyers összegeik alább szerepelnek. A tényleges program és Excel ellenőrzése a fejlesztés során ezekre épül.
 - Végleges: egész forintos, nullától távolodó félérték-kerekítés; importonként kerekített növekmény, összegek tartós tárolása nélkül; megszakított kézi árfolyambevitelkor teljes import mentés nélküli leállítása.
-- Következő szakasz: **3. Feldolgozó mag**, közösen, fájlonként haladva.
+- Következő szakasz: **3. Feldolgozó mag**, fájlonként haladva.
 
 ### 3. Feldolgozó mag
 
