@@ -77,6 +77,30 @@ A három havi összeghez minden új, még fel nem dolgozott számlatétel egysze
 - Tételek csoportosítása CSV-dátum, év, pénznem, kisbetűfüggetlen csoport, cikkszám és számlaszám szerint; a műhelyhez kapcsolódó számlák kiválasztása. A `Beszerzés` minden csoportját összegezzük; a `Trailer` csoportnál nincs `Számla` szűrés.
 - Napi és havi összegek számítása, valamint az importok közötti ismétlődés kiszűrése. A feldolgozás eredménye írás előtt áttekinthető legyen.
 
+**Állapot: elkészült, a mintafájlokkal ellenőrizve.**
+
+Megvalósult:
+- Az AxelPro CSV-fájlok beolvasása és a szükséges mezők ellenőrzése.
+- A leltártételek kihagyása.
+- A már feldolgozott bizonylatok kiszűrése az év és a bizonylatszám alapján.
+- A napi összegek számítása, beleértve a munkadíjas számlákhoz tartozó
+  új és bontott alkatrészek külön összesítését.
+- A SANY, DIAG és KJ cikkszámok havi összesítése.
+- A kiegészítő újalkatrész-csoportok kezelése.
+- A csoportnevek és cikkszámok kis- és nagybetűktől független összehasonlítása.
+- Az EUR-tételek átváltása a megadott napi árfolyammal.
+- Az összesített értékek egész forintra kerekítése.
+
+Az ellenőrzések az eredeti mintát, valamint napokon, hónapokon és
+éveken átívelő tesztfájlokat is érintettek. Az ismételt import és a
+kiegészítő újalkatrész-csoportok kezelése is ellenőrizve lett.
+
+A feldolgozó mag nem végez fájlmentést, Excel-módosítást vagy
+árfolyamlekérést. A feldolgozott bizonylatok és az árfolyamok tartós
+tárolását a későbbi modulok biztosítják.
+
+**Következő lépés:** az Excel-kezelés megvalósítása.
+
 ### 4. Excel és tartós állapot
 
 - A gép aktuális évének januárjától az aktuális hónapig terjedő, szükség esetén üres munkalapok létrehozása, a végleges havi sablon alkalmazása és az `Összesítő` kezdeti havi oszlopainak összekötése. A következő hónap és összesítő oszlop létrehozása az első oda tartozó CSV-tételnél; új évnél új éves munkafüzet januári kezdettel, régebbi év pótlásakor az érintett év saját fájljának bővítése. A dátumok, formázás és minden érintett képlet ellenőrzése.
