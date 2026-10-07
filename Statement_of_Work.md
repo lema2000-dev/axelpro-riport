@@ -108,6 +108,12 @@ tárolását a későbbi modulok biztosítják.
 - Csak a célcellák módosítása; a meglévő munkafüzet biztonsági másolatának készítése mentés előtt.
 - Beállítások és az **összes eddig feldolgozott év–bizonylatszám pár** tartós helyi mentése; következetes működés újraindítás, átfedő export, több éves CSV és évváltás esetén. Külön reset művelet a teljes alkalmazásállapotra, az Excel-fájlok megőrzésével.
 
+**Jelenlegi állapot – részben kész**
+
+- **Kész:** a sablon betöltése; cellák, formázások és összevonások másolása; hónaphatáron rövidített heti blokkok és heti képletek; havi záró és képletei; havi Euro-cellák és az Összesítő hivatkozásai; éves munkafüzet létrehozása januártól a megadott hónapig, valamint bővítése a meglévő adatok megőrzésével.
+- **Hátravan:** a feldolgozott CSV-összegek célcellákba írása; a CSV dátuma szerinti éves fájl kiválasztása, létrehozása és bővítése; biztonsági másolat és biztonságos mentés; beállítások, árfolyamok és év–bizonylatszám párok tartós tárolása; összehangolt Excel- és állapotmentés; reset az Excel-fájlok megőrzésével.
+- **Ellenőrzés:** a generálási tesztek sikeresek; az adatbevitel, újraindítás és megszakított mentés próbái, valamint a képletek kiszámolt eredményeinek ellenőrzése még hátravannak.
+
 ### 5. Grafikus felület és árfolyam
 
 - Mentési mappa, riport létrehozása, CSV kiválasztása, további újalkatrész-csoportok szerkesztése és saját állapot alaphelyzetbe állítása.
