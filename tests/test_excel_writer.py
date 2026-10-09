@@ -3,7 +3,7 @@ from openpyxl.styles import Font, PatternFill
 
 from copy import copy
 
-from datetime import date
+from datetime import date, datetime
 
 from axelpro_riport.excel_writer import (
     copy_block,
@@ -16,8 +16,16 @@ from axelpro_riport.excel_writer import (
     ensure_month_sheet,
     ensure_summary_month,
     ensure_months_through,
+    find_day_column,
+    add_cell_amount,
+    write_daily_totals,
+    write_monthly_totals,
+    write_import_result,
 )
+
 from axelpro_riport.calendar_utils import get_month_weeks
+
+from axelpro_riport.models import DailyTotals, MonthlyTotals, ImportResult
 
 
 def test_copy_block() -> None:
@@ -539,6 +547,233 @@ def test_year_workbook() -> None:
     template_workbook.close()
     print("Sikeres éves munkafüzet- és hónapbővítési teszt.")
 
+def test_find_day_column() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Október"
+
+    sheet["B2"] = date(2026, 10, 1)
+    sheet["D2"] = datetime(2026, 10, 2)
+    sheet["H2"] = 40 # Heti sorszám, nem dátum.
+
+    assert find_day_column(sheet, date(2026, 10, 1)) == 2
+    assert find_day_column(sheet, date(2026, 10, 2)) == 4
+
+    try:
+        find_day_column(sheet, date(2026, 10, 3))
+    except ValueError as error:
+        assert "2026-10-03" in str(error)
+    else:
+        raise AssertionError("Hiányzó dátumnál hibát kellett volna jeleznie.")
+
+    workbook.close()
+    print("A dátumoszlop keresésének tesztje sikeres.")
+
+def test_add_cell_amount() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+
+    # Üres, összevont cálcellába írunk.
+    sheet.merge_cells("B8:C8")
+    add_cell_amount(sheet, row=8, column=2, amount=1200)
+    assert sheet["B8"].value == 1200
+
+    # Az új import növeli a meglévő értéket.
+    add_cell_amount(sheet, row=8, column=2, amount=3500)
+    assert sheet["B8"].value == 4700
+
+    # A negatív korrekció csökkenti az összeget.
+    add_cell_amount(sheet, row=8, column=2, amount=-700)
+    assert sheet["B8"].value == 4000
+
+    # Hibás tartalom esetén az eredeti érték megmarad.
+    for invalid_value in ("szöveg", "=SUM(B8:C8)", True):
+        sheet["B9"] = invalid_value
+
+        try:
+            add_cell_amount(sheet, row=9, column=2, amount=100)
+        except ValueError as error:
+            assert sheet["B9"].value == invalid_value
+        else:
+            raise AssertionError(
+                "A hibás cellatartalom nem okozott hibát."
+            )
+
+    workbook.close()
+    print("Az összegek hozzáadásának tesztje sikeres.")
+
+def test_write_daily_totals() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["D2"] = date(2026, 10, 2)
+
+    expected = {
+        8: 14000,
+        9: 37000,
+        10: 22500,
+        23: 10000,
+        24: 33000,
+        27: 13125,
+        32: 1250,
+        40: 7500,
+    }
+
+    for row in expected:
+        sheet.merge_cells(
+            start_row=row,
+            end_row=row,
+            start_column=4,
+            end_column=5
+        )
+
+    sheet["D8"] = 1000
+    sheet["D4"] = 900 # Kézzel kitöltött, nem célcella.
+    sheet["B8"] = 500 # Másik napi adat.
+    sheet["B14"] = "=B12+B13"
+
+    totals = DailyTotals(
+        movement_date=date(2026, 10, 2),
+        used_parts=14000,
+        new_parts=37000,
+        labor=22500,
+        workshop_used_parts=10000,
+        workshop_new_parts=33000,
+        purchases=13125,
+        shipping=1250,
+        trailer=7500,
+    )
+
+    write_daily_totals(sheet=sheet, totals=totals)
+
+    for row, amount in expected.items():
+        previous_amount = 1000 if row == 8 else 0
+        assert sheet.cell(row=row, column=4).value == previous_amount + amount
+
+    assert sheet["D4"].value == 900
+    assert sheet["B8"].value == 500
+    assert sheet["B14"].value == "=B12+B13"
+
+    workbook.close()
+    print("A napi összesítések beírásának tesztje sikeres.")
+
+def test_write_monthly_totals() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Október"
+
+    for row in (82, 83, 84):
+        sheet.merge_cells(
+            start_row=row,
+            end_row=row,
+            start_column=2,
+            end_column=3,
+        )
+
+    sheet["B82"] = 1000
+    sheet["B81"] = "=SUM(B78:B80)"
+    sheet["B74"] = 5000  # Kézzel kitöltött adat.
+
+    totals = MonthlyTotals(
+        year=2026,
+        month=10,
+        sany=500,
+        diag=1000,
+        kj=1500,
+    )
+
+    write_monthly_totals(sheet=sheet, totals=totals)
+
+    assert sheet["B82"].value == 1500
+    assert sheet["B83"].value == 1000
+    assert sheet["B84"].value == 1500
+
+    assert sheet["B81"].value == "=SUM(B78:B80)"
+    assert sheet["B74"].value == 5000
+
+    workbook.close()
+    print("A havi összesítések beírásának tesztje sikeres.")
+
+def test_write_import_result() -> None:
+    template_workbook = Workbook()
+    template = template_workbook.active
+    template.title = "Szeptember"
+    template["A82"] = "Segédanyag"
+
+    workbook = create_year_workbook(
+        template_sheet=template,
+        year=2026,
+        last_month=1,
+    )
+
+    workbook["Január"]["B82"] = 100
+    workbook["Január"]["B74"] = 5000
+
+    result = ImportResult(
+        daily_totals=[
+            DailyTotals(
+                movement_date=date(2026, 2, 2),
+                used_parts=14000,
+                new_parts=37000,
+                labor=22500,
+                workshop_used_parts=10000,
+                workshop_new_parts=33000,
+                purchases=13125,
+                shipping=1250,
+                trailer=7500,
+            ),
+            DailyTotals(
+                movement_date=date(2027, 3, 1),
+                used_parts=999,
+                new_parts=0,
+                labor=0,
+                workshop_used_parts=0,
+                workshop_new_parts=0,
+                purchases=0,
+                shipping=0,
+                trailer=0,
+            ),
+        ],
+        monthly_totals=[
+            MonthlyTotals(2026, 1, 500, 1000, 1500),
+            MonthlyTotals(2027, 3, 999, 999, 999),
+        ],
+        new_documents={
+            (2026, "TESZT-1"),
+            (2027, "TESZT-2"),
+        },
+    )
+
+    write_import_result(
+        workbook=workbook,
+        template_sheet=template,
+        year=2026,
+        result=result,
+    )
+
+    assert "Február" in workbook.sheetnames
+    assert "Március" not in workbook.sheetnames
+
+    february = workbook["Február"]
+    column = find_day_column(february, date(2026, 2, 2))
+    assert february.cell(row=8, column=column).value == 14000
+    assert february.cell(row=40, column=column).value == 7500
+
+    assert workbook["Január"]["B82"].value == 600
+    assert workbook["Január"]["B83"].value == 1000
+    assert workbook["Január"]["B84"].value == 1500
+    assert workbook["Január"]["B74"].value == 5000
+
+    assert workbook["Összesítő"]["C2"].value == "Február"
+    assert workbook["Euro"]["A3"].value == "Február"
+    assert result.new_documents == {
+        (2026, "TESZT-1"),
+        (2027, "TESZT-2"),
+    }
+
+    workbook.close()
+    template_workbook.close()
+    print("Az importált napi és havi összesítések beírásának tesztje sikeres.")
+
 
 if __name__ == "__main__":
     test_copy_block()
@@ -549,3 +784,8 @@ if __name__ == "__main__":
     test_ensure_month_sheet()
     test_summary_month()
     test_year_workbook()
+    test_find_day_column()
+    test_add_cell_amount()
+    test_write_daily_totals()
+    test_write_monthly_totals()
+    test_write_import_result()
