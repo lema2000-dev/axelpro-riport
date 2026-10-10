@@ -1,15 +1,23 @@
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
 from copy import copy
 
 from datetime import date, datetime
+from decimal import Decimal
+
+from tempfile import TemporaryDirectory
+
+from unittest.mock import patch
+
+from pathlib import Path
 
 from axelpro_riport.excel_writer import (
     copy_block,
     clear_input_values,
     create_week_block,
     create_year_workbook,
+    load_or_create_year_workbook,
     set_week_dates,
     create_month_sheet,
     ensure_month_exchange_rate,
@@ -21,11 +29,22 @@ from axelpro_riport.excel_writer import (
     write_daily_totals,
     write_monthly_totals,
     write_import_result,
+    get_year_workbook_path,
+    create_workbook_backup,
+    save_workbook_safely,
+    PROCESSED_DOCUMENTS_SHEET,
+    ensure_processed_documents_sheet,
+    read_processed_documents,
+    add_processed_documents,
+    DAILY_EXCHANGE_RATES_SHEET,
+    add_daily_exchange_rates,
+    read_daily_exchange_rates,
+    update_monthly_exchange_rates,
 )
 
 from axelpro_riport.calendar_utils import get_month_weeks
 
-from axelpro_riport.models import DailyTotals, MonthlyTotals, ImportResult
+from axelpro_riport.models import DailyTotals, MonthlyTotals, ImportResult, DailyExchangeRate
 
 
 def test_copy_block() -> None:
@@ -750,6 +769,10 @@ def test_write_import_result() -> None:
         result=result,
     )
 
+    assert read_processed_documents(workbook) == {
+        (2026, "TESZT-1")
+    }
+
     assert "Február" in workbook.sheetnames
     assert "Március" not in workbook.sheetnames
 
@@ -774,8 +797,339 @@ def test_write_import_result() -> None:
     template_workbook.close()
     print("Az importált napi és havi összesítések beírásának tesztje sikeres.")
 
+def test_load_or_create_workbook() -> None:
+    template_workbook = Workbook()
+    template = template_workbook.active
 
-if __name__ == "__main__":
+    with TemporaryDirectory() as directory:
+        path = get_year_workbook_path(directory, 2026)
+
+        assert path.name == "Napi_értékesítési_riport_2026.xlsx"
+
+        workbook = load_or_create_year_workbook(
+            output_directory=directory,
+            template_sheet=template,
+            year=2026,
+            last_month=2
+        )
+
+        assert "Január" in workbook.sheetnames
+        assert "Február" in workbook.sheetnames
+        assert "Március" not in workbook.sheetnames
+        assert not path.exists() # A létrehozás még nem ment fájlt.
+
+        workbook["Január"]["B8"] = 1234
+        workbook["Január"]["B12"] = "=B8+B9+B10"
+        workbook.save(path)
+        workbook.close()
+
+        loaded = load_or_create_year_workbook(
+            output_directory=directory,
+            template_sheet=template,
+            year=2026,
+        )
+
+        assert loaded["Január"]["B8"].value == 1234
+        assert loaded["Január"]["B12"].value == "=B8+B9+B10"
+        assert "Február" in loaded.sheetnames
+
+        loaded.close()
+
+    template_workbook.close()
+    print("A munkafüzet betöltésének vagy létrehozásának tesztje sikeres.")
+
+def test_create_workbook_backup() -> None:
+    with TemporaryDirectory() as directory:
+        path = get_year_workbook_path(directory, 2026)
+
+        # Nem létező riportról még nem készül másolat.
+        assert create_workbook_backup(path) is None
+        assert not (path.parent / "backups").exists()
+
+        workbook = Workbook()
+        workbook.active["B8"] = 1234
+        workbook.active["B12"] = "=B8+B9+B10"
+        workbook.save(path)
+        workbook.close()
+
+        original_content = path.read_bytes()
+
+        backup_path = create_workbook_backup(path)
+
+        assert backup_path is not None
+        assert backup_path.exists()
+        assert backup_path.parent.name == "backups"
+        assert backup_path.name.startswith(f"{path.stem}_")
+        assert backup_path.suffix == ".xlsx"
+
+        # A másolat pontos, az eredeti fájl változatlan.
+        assert backup_path.read_bytes() == original_content
+        assert path.read_bytes() == original_content
+
+        backup = load_workbook(backup_path, data_only=False)
+        assert backup.active["B8"].value == 1234
+        assert backup.active["B12"].value == "=B8+B9+B10"
+        backup.close()
+        print("A munkafüzet biztonsági mentésének tesztje sikeres.")
+
+def test_save_workbook_safely() -> None:
+    with TemporaryDirectory() as directory:
+        path = get_year_workbook_path(directory, 2026)
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet["B8"] = 1000
+
+        # Első mentés még nincs biztonsági másolat.
+        assert save_workbook_safely(workbook, path) is None
+        assert path.exists()
+
+        sheet["B8"] = 2500
+        backup_path = save_workbook_safely(workbook, path)
+        
+        assert backup_path is not None
+
+        backup = load_workbook(backup_path)
+        assert backup.active["B8"].value == 1000
+        backup.close()
+
+        saved = load_workbook(path)
+        assert saved.active["B8"].value == 2500
+        saved.close()
+
+        original_content = path.read_bytes()
+
+        # Félkész ideiglenes fájlt hagyó mentési hibát szimulálunk.
+        def failing_save(filename) -> None:
+            Path(filename).write_bytes(b"unfinished")
+            raise OSError("Szimulált mentési hiba")
+
+        with patch.object(workbook, "save", side_effect=failing_save):
+            try:
+                save_workbook_safely(workbook, path)
+            except OSError as error:
+                assert str(error) == "Szimulált mentési hiba"
+            else:
+                raise AssertionError("A mentési hiba nem terjed tovább.")
+
+        assert path.read_bytes() == original_content
+        assert not list(path.parent.glob(f".{path.stem}_*.xlsx"))
+
+        # A biztonsági másolat hibája esetén sem írjuk felül a riportot.
+        sheet["B8"] = 9000
+
+        with patch(
+            "axelpro_riport.excel_writer.create_workbook_backup",
+            side_effect=OSError("Szimulált biztonsági másolat hiba")
+        ):
+            try:
+                save_workbook_safely(workbook, path)
+            except OSError as error:
+                assert str(error) == "Szimulált biztonsági másolat hiba"
+            else:
+                raise AssertionError("A biztonsági másolat hibája nem terjed tovább.")
+
+        assert path.read_bytes() == original_content
+        assert not list(path.parent.glob(f".{path.stem}_*.xlsx"))
+        
+        workbook.close()
+        print("A biztonságos mentés tesztje sikeres.")
+
+def test_processed_documents() -> None:
+    workbook = Workbook()
+
+    assert read_processed_documents(workbook) == set()
+    assert PROCESSED_DOCUMENTS_SHEET not in workbook.sheetnames
+
+    sheet = ensure_processed_documents_sheet(workbook)
+
+    assert sheet["A1"].value == "Év"
+    assert sheet["B1"].value == "Bizonylatszám"
+    assert sheet.sheet_state == "veryHidden"
+    assert ensure_processed_documents_sheet(workbook) is sheet
+
+    documents = {
+        (2026, "SZ-2026/001"),
+        (2026, "SZ-2026/002"),
+        (2026, "=TESZT")
+    }
+
+    add_processed_documents(workbook, documents)
+
+    assert read_processed_documents(workbook) == documents
+    assert sheet.max_row == 4
+
+    # Ugyanazok a kulcsok nem kerülnek be mégegyszer.
+    add_processed_documents(workbook, documents)
+
+    assert sheet.max_row == 4
+
+    # A hibás kulcs nem módosíthatja a nyilvántartást.
+    try:
+        add_processed_documents(workbook, {(2026, "")})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("A hibás bizonylatkulcsot elfogadta.")
+
+    assert read_processed_documents(workbook) == documents
+    assert sheet.max_row == 4
+
+    with TemporaryDirectory() as directory:
+        path = get_year_workbook_path(directory, 2026)
+        save_workbook_safely(workbook, path)
+
+        loaded = load_workbook(path, data_only=False)
+        try:
+            assert read_processed_documents(loaded) == documents
+
+            loaded_sheet = loaded[PROCESSED_DOCUMENTS_SHEET]
+            assert loaded_sheet.sheet_state == "veryHidden"
+
+            for row in loaded_sheet.iter_rows(min_row=2, max_col=2):
+                assert row[1].data_type == "s"
+        finally:
+            loaded.close()
+
+    workbook.close()
+    print("A feldolgozott bizonylatok nyilvántartásának tesztje sikeres.")
+
+def test_daily_exchange_rates() -> None:
+    workbook = Workbook()
+
+    day = date(2026, 10, 11)
+    record = DailyExchangeRate(
+        application_date=day,
+        source_date=date(2026, 10, 9),
+        rate=Decimal("395.12"),
+    )
+    rates = {day: record}
+
+    try:
+        assert read_daily_exchange_rates(workbook) == {}
+
+        add_daily_exchange_rates(workbook, rates)
+
+        sheet = workbook[DAILY_EXCHANGE_RATES_SHEET]
+
+        assert sheet.sheet_state == "veryHidden"
+        assert sheet["A2"].value == day
+        assert sheet["B2"].value == date(2026, 10, 9)
+        assert sheet["C2"].value == 395.12
+        assert read_daily_exchange_rates(workbook) == rates
+
+        # Az ismételt hozzáadás nem hoz létre új sort.
+        add_daily_exchange_rates(workbook, rates)
+        assert sheet.max_row == 2
+
+        # Egy már alkalmazott árfolyam nem írható felül.
+        conflicting_record = DailyExchangeRate(
+            application_date=day,
+            source_date=date(2026, 10, 9),
+            rate=Decimal("396.00"),
+        )
+
+        try:
+            add_daily_exchange_rates(
+                workbook,
+                {day: conflicting_record},
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Az eltérő árfolyamot elfogadta.")
+
+        assert read_daily_exchange_rates(workbook) == rates
+        assert sheet.max_row == 2
+
+        with TemporaryDirectory() as directory:
+            path = get_year_workbook_path(directory, 2026)
+            save_workbook_safely(workbook, path)
+
+            loaded = load_workbook(path, data_only=False)
+            try:
+                assert read_daily_exchange_rates(loaded) == rates
+                assert (
+                    loaded[DAILY_EXCHANGE_RATES_SHEET].sheet_state
+                    == "veryHidden"
+                )
+            finally:
+                loaded.close()
+
+    finally:
+        workbook.close()
+
+    print("A napi árfolyamok nyilvántartásának tesztje sikeres.")
+
+def test_update_monthly_exchange_rates() -> None:
+    workbook = Workbook()
+
+    records = [
+        DailyExchangeRate(
+            application_date=date(2026, 10, 9),
+            source_date=date(2026, 10, 9),
+            rate=Decimal("395.12"),
+        ),
+        DailyExchangeRate(
+            application_date=date(2026, 10, 30),
+            source_date=date(2026, 10, 30),
+            rate=Decimal("396.08"),
+        ),
+        # Novemberben alkalmazott, de októberi forrású árfolyam.
+        DailyExchangeRate(
+            application_date=date(2026, 11, 1),
+            source_date=date(2026, 10, 30),
+            rate=Decimal("396.08"),
+        ),
+        DailyExchangeRate(
+            application_date=date(2026, 11, 2),
+            source_date=date(2026, 11, 2),
+            rate=Decimal("397.25"),
+        ),
+    ]
+
+    try:
+        add_daily_exchange_rates(
+            workbook,
+            {
+                record.application_date: record
+                for record in records
+            },
+        )
+
+        # Egy forrásadat nélküli hónap értékét meg kell őrizni.
+        euro = workbook.create_sheet("Euro")
+        euro["A10"] = "Szeptember"
+        euro["B10"] = 390
+        euro["C10"] = date(2026, 9, 30)
+
+        update_monthly_exchange_rates(workbook, year=2026)
+
+        # Október sora: 10 + 1.
+        assert euro["A11"].value == "Október"
+        assert euro["B11"].value == 396.08
+        assert euro["C11"].value == date(2026, 10, 30)
+
+        # November sora: 11 + 1.
+        assert euro["A12"].value == "November"
+        assert euro["B12"].value == 397.25
+        assert euro["C12"].value == date(2026, 11, 2)
+
+        assert euro["B10"].value == 390
+        assert euro["C10"].value == date(2026, 9, 30)
+
+        # Az ismételt frissítés ugyanazt az eredményt adja.
+        update_monthly_exchange_rates(workbook, year=2026)
+
+        assert euro["B11"].value == 396.08
+        assert euro["B12"].value == 397.25
+
+    finally:
+        workbook.close()
+
+    print("A havi árfolyamok frissítésének tesztje sikeres.")
+
+def run_all_tests() -> None:
     test_copy_block()
     test_clear_input_values()
     test_create_week_block()
@@ -789,3 +1143,12 @@ if __name__ == "__main__":
     test_write_daily_totals()
     test_write_monthly_totals()
     test_write_import_result()
+    test_load_or_create_workbook()
+    test_create_workbook_backup()
+    test_save_workbook_safely()
+    test_processed_documents()
+    test_daily_exchange_rates()
+    test_update_monthly_exchange_rates()
+
+if __name__ == "__main__":
+    run_all_tests()

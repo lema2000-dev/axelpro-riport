@@ -1,8 +1,9 @@
 """A riport munkalapjainak létrehozása a végleges Excel-sablon alapján."""
-
 from copy import copy
 from datetime import date, datetime
 from pathlib import Path
+from decimal import Decimal, InvalidOperation
+from math import isfinite
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
@@ -11,9 +12,13 @@ from openpyxl.utils import get_column_letter
 from openpyxl.workbook.workbook import Workbook as WorkbookType
 from openpyxl.worksheet.worksheet import Worksheet
 
+from shutil import copy2
+
+from tempfile import NamedTemporaryFile
+
 from .calendar_utils import get_month_weeks
 
-from .models import DailyTotals, MonthlyTotals, ImportResult
+from .models import DailyTotals, MonthlyTotals, ImportResult, DailyExchangeRate
 
 
 MONTH_NAMES = (
@@ -40,6 +45,9 @@ MONTHLY_CLOSE_START_ROW = 43
 MONTHLY_CLOSE_END_ROW = 85
 MONTHLY_CLOSE_START_COLUMN = 1
 MONTHLY_CLOSE_END_COLUMN = 3
+
+PROCESSED_DOCUMENTS_SHEET = "_importált_bizonylatok"
+DAILY_EXCHANGE_RATES_SHEET = "_napi_árfolyamok"
 
 # Az automatikusan kitöltendő napi adatok celláinak sorai.
 DAILY_TARGET_ROWS = {
@@ -1012,3 +1020,406 @@ def write_import_result(
 
         sheet = workbook[MONTH_NAMES[totals.month - 1]]
         write_monthly_totals(sheet=sheet, totals=totals)
+
+    year_documents = {
+        document_key for document_key in result.new_documents if document_key[0] == year
+    }
+
+    add_processed_documents(workbook=workbook, documents=year_documents)
+
+# Éves riportfájlok kezelése
+
+def get_year_workbook_path(
+    output_directory: str | Path,
+    year: int
+) -> Path:
+    """Az adott év riportfájljának elérési útja."""
+    if not 1 <= year <= 9999:
+        raise ValueError("Az évszám 1 és 9999 közötti lehet.")
+
+    return Path(output_directory) / f"Napi_értékesítési_riport_{year}.xlsx"
+
+def load_or_create_year_workbook(
+    output_directory: str | Path,
+    template_sheet: Worksheet,
+    year: int,
+    *,
+    last_month: int = 1
+) -> WorkbookType:
+    """A meglévő éves riport megnyitása vagy új munkafüzet létrehozása."""
+    if not 1 <= year <= 9999:
+        raise ValueError("Az évszám 1 és 9999 közötti lehet.")
+
+    path = get_year_workbook_path(output_directory, year)
+
+    if path.exists():
+        return load_workbook(path, data_only=False)
+
+    return create_year_workbook(
+        template_sheet=template_sheet,
+        year=year,
+        last_month=last_month
+    )
+
+def create_workbook_backup(
+    workbook_path: str | Path
+) -> Path | None:
+    """A meglévő riport másolása egy dátumozott biztonsági fájlba."""
+    path = Path(workbook_path)
+
+    if not path.exists():
+        return None
+
+    backup_directory = path.parent / "backups"
+    backup_directory.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    backup_path = backup_directory / (
+        f"{path.stem}_{timestamp}{path.suffix}"
+    )
+
+    copy2(path, backup_path)
+
+    return backup_path
+
+def save_workbook_safely(
+    workbook: WorkbookType,
+    workbook_path: str | Path
+) -> Path | None:
+    """Mentés ideinleges fájlon keresztül, a korábbi riport megőrzésével."""
+    path = Path(workbook_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+    with NamedTemporaryFile(
+        dir=path.parent,
+        prefix=f".{path.stem}_",
+        suffix=".xlsx",
+        delete=False
+    ) as temporary_file:
+        temporary_path = Path(temporary_file.name)
+
+    try:
+        workbook.save(temporary_path)
+
+        backup_path = create_workbook_backup(path)
+        temporary_path.replace(path)
+
+        return backup_path
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+# Importált bizonylatok nyilvántartása
+
+def ensure_processed_documents_sheet(
+    workbook: WorkbookType
+) -> Worksheet:
+    """A bizonylatnyilvántartó munkalap lekérése vagy létrehozása."""
+    if PROCESSED_DOCUMENTS_SHEET in workbook.sheetnames:
+        sheet = workbook[PROCESSED_DOCUMENTS_SHEET]
+    else:
+        sheet = workbook.create_sheet(title=PROCESSED_DOCUMENTS_SHEET)
+
+        sheet["A1"] = "Év"
+        sheet["B1"] = "Bizonylatszám"
+
+    sheet.sheet_state = "veryHidden"
+
+    return sheet
+
+def read_processed_documents(
+    workbook: WorkbookType
+) -> set[tuple[int, str]]:
+    """A nyilvántartott bizonylatkulcsok visszaolvasása."""
+    if PROCESSED_DOCUMENTS_SHEET not in workbook.sheetnames:
+        return set()
+
+    sheet = workbook[PROCESSED_DOCUMENTS_SHEET]
+    documents: set[tuple[int, str]] = set()
+
+    for row_number, (year, document_number) in enumerate(
+        sheet.iter_rows(
+            min_row=2,
+            max_col=2,
+            values_only=True
+        ),
+        start=2,
+    ):
+        if year is None and document_number is None:
+            continue
+
+        if (
+            isinstance(year, bool)
+            or not isinstance(year, int)
+            or not 1 <= year <= 9999
+            or not isinstance(document_number, str)
+            or not document_number.strip()
+        ):
+            raise ValueError(
+                f"Hibás bizonylatnyilvántartás a(z) {sheet.title} munkalap {row_number}. sorában."
+            )
+
+        documents.add((year, document_number))
+
+    return documents
+
+def add_processed_documents(
+    workbook: WorkbookType,
+    documents: set[tuple[int, str]]
+) -> None:
+    """Az új bizonylatkulcsok hozzáadása a nyilvántartáshoz."""
+    existing_documents = read_processed_documents(workbook)
+    new_documents = documents - existing_documents
+
+    if not new_documents:
+        return
+
+    # Minden úk kulcsot ellenőrzünk a munkalap módosítása előtt.
+    for year, document_number in new_documents:
+        if (
+            isinstance(year, bool)
+            or not isinstance(year, int)
+            or not 1 <= year <= 9999
+            or not isinstance(document_number, str)
+            or not document_number.strip()
+        ):
+            raise ValueError(
+                f"Hibás bizonylatkulcs: {(year, document_number)!r}"
+            )
+
+    sheet = ensure_processed_documents_sheet(workbook)
+
+    for year, document_number in sorted(new_documents):
+        row = sheet.max_row + 1
+
+        sheet.cell(row=row, column=1).value = year
+
+        cell = sheet.cell(row=row, column=2)
+        cell.value = document_number
+        cell.data_type = "s"
+
+def ensure_daily_exchange_rates_sheet(
+    workbook: WorkbookType
+) -> Worksheet:
+    """A napi árfolyamokat tároló munkalap lekérése vagy létrehozása."""
+    if DAILY_EXCHANGE_RATES_SHEET in workbook.sheetnames:
+        sheet = workbook[DAILY_EXCHANGE_RATES_SHEET]
+    else:
+        sheet = workbook.create_sheet(title=DAILY_EXCHANGE_RATES_SHEET)
+
+        sheet["A1"] = "Alkalmazás dátuma"
+        sheet["B1"] = "Árfolyam dátuma"
+        sheet["C1"] = "EUR/HUF árfolyam"
+
+        sheet.column_dimensions["A"].width = 22
+        sheet.column_dimensions["B"].width = 22
+        sheet.column_dimensions["C"].width = 22
+
+    sheet.sheet_state = "veryHidden"
+
+    return sheet
+
+def read_daily_exchange_rates(
+    workbook: WorkbookType,
+) -> dict[date, DailyExchangeRate]:
+    """A napi árfolyamok visszaolvasása a forrásdátumukkal együtt."""
+    if DAILY_EXCHANGE_RATES_SHEET not in workbook.sheetnames:
+        return {}
+
+    sheet = workbook[DAILY_EXCHANGE_RATES_SHEET]
+
+    expected_headers = (
+        "Alkalmazás dátuma",
+        "Árfolyam dátuma",
+        "EUR/HUF árfolyam",
+    )
+
+    actual_headers = tuple(
+        sheet.cell(row=1, column=column).value
+        for column in range(1, 4)
+    )
+
+    if actual_headers != expected_headers:
+        raise ValueError(
+            "A napi árfolyamok munkalapjának szerkezete nem megfelelő."
+        )
+
+    exchange_rates: dict[date, DailyExchangeRate] = {}
+
+    for row_number, (application_date, source_date, value) in enumerate(
+        sheet.iter_rows(
+            min_row=2,
+            max_col=3,
+            values_only=True,
+        ),
+        start=2,
+    ):
+        if (
+            application_date is None
+            and source_date is None
+            and value is None
+        ):
+            continue
+
+        if isinstance(application_date, datetime):
+            application_date = application_date.date()
+
+        if isinstance(source_date, datetime):
+            source_date = source_date.date()
+
+        if (
+            not isinstance(application_date, date)
+            or not isinstance(source_date, date)
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float, str, Decimal))
+        ):
+            raise ValueError(
+                f"Hibás napi árfolyam a(z) {row_number}. sorban."
+            )
+
+        try:
+            rate = Decimal(str(value))
+        except InvalidOperation as exc:
+            raise ValueError(
+                f"Hibás napi árfolyam a(z) {row_number}. sorban."
+            ) from exc
+
+        if (
+            not rate.is_finite()
+            or rate <= 0
+            or source_date > application_date
+        ):
+            raise ValueError(
+                f"Hibás napi árfolyam a(z) {row_number}. sorban."
+            )
+
+        if application_date in exchange_rates:
+            raise ValueError(
+                f"Ismétlődő alkalmazási dátum: "
+                f"{application_date:%Y-%m-%d}"
+            )
+
+        exchange_rates[application_date] = DailyExchangeRate(
+            application_date=application_date,
+            source_date=source_date,
+            rate=rate,
+        )
+
+    return exchange_rates
+
+def add_daily_exchange_rates(
+    workbook: WorkbookType,
+    exchange_rates: dict[date, DailyExchangeRate],
+) -> None:
+    """Új árfolyamrekordok hozzáadása a tárolt értékek megőrzésével."""
+    existing_rates = read_daily_exchange_rates(workbook)
+    new_rates: dict[date, DailyExchangeRate] = {}
+
+    # Minden rekordot ellenőrzünk a munkalap módosítása előtt.
+    for day, record in exchange_rates.items():
+        if not isinstance(record, DailyExchangeRate):
+            raise ValueError(f"Hibás árfolyamrekord: {record!r}")
+
+        if (
+            not isinstance(day, date)
+            or isinstance(day, datetime)
+            or not isinstance(record.application_date, date)
+            or isinstance(record.application_date, datetime)
+            or not isinstance(record.source_date, date)
+            or isinstance(record.source_date, datetime)
+            or day != record.application_date
+            or record.source_date > day
+            or not isinstance(record.rate, Decimal)
+            or not record.rate.is_finite()
+            or record.rate <= 0
+        ):
+            raise ValueError(
+                f"Hibás árfolyamrekord: {day!r} -> {record!r}"
+            )
+
+        numeric_rate = float(record.rate)
+
+        if not isfinite(numeric_rate) or numeric_rate <= 0:
+            raise ValueError(
+                f"Excelben nem tárolható árfolyam: {record.rate!r}"
+            )
+
+        if day in existing_rates:
+            if existing_rates[day] != record:
+                raise ValueError(
+                    f"Eltérő tárolt árfolyamrekord: {day:%Y-%m-%d}"
+                )
+            continue
+
+        new_rates[day] = record
+
+    if not new_rates:
+        return
+
+    sheet = ensure_daily_exchange_rates_sheet(workbook)
+
+    for day, record in sorted(new_rates.items()):
+        row = sheet.max_row + 1
+
+        application_cell = sheet.cell(row=row, column=1)
+        application_cell.value = day
+        application_cell.number_format = "yyyy-mm-dd"
+
+        source_cell = sheet.cell(row=row, column=2)
+        source_cell.value = record.source_date
+        source_cell.number_format = "yyyy-mm-dd"
+
+        rate_cell = sheet.cell(row=row, column=3)
+        rate_cell.value = float(record.rate)
+        rate_cell.number_format = "0.00"
+
+def update_monthly_exchange_rates(
+    workbook: WorkbookType,
+    year: int,
+) -> None:
+    """A havi árfolyamok frissítése a legutolsó tárolt forrásdátum alapján."""
+    records = read_daily_exchange_rates(workbook)
+    source_rates: dict[date, Decimal] = {}
+
+    for record in records.values():
+        source_date = record.source_date
+
+        if source_date.year != year:
+            continue
+
+        if (
+            source_date in source_rates
+            and source_rates[source_date] != record.rate
+        ):
+            raise ValueError(
+                f"Eltérő árfolyamok ugyanahhoz a forrásdátumhoz: "
+                f"{source_date:%Y-%m-%d}"
+            )
+
+        source_rates[source_date] = record.rate
+
+    if not source_rates:
+        return
+
+    sheet = ensure_exchange_rate_sheet(workbook)
+    sheet["C1"] = "Árfolyam dátuma"
+    sheet.column_dimensions["C"].width = 18
+
+    months = sorted({day.month for day in source_rates})
+
+    for month in months:
+        latest_date = max(
+            day for day in source_rates
+            if day.month == month
+        )
+
+        ensure_month_exchange_rate(workbook, month)
+
+        row = month + 1
+        sheet.cell(row=row, column=2).value = float(
+            source_rates[latest_date]
+        )
+
+        date_cell = sheet.cell(row=row, column=3)
+        date_cell.value = latest_date
+        date_cell.number_format = "yyyy-mm-dd"

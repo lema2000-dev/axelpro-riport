@@ -43,3 +43,8 @@ class ImportResult:
     monthly_totals: list[MonthlyTotals]
     new_documents: set[tuple[int, str]]
 
+@dataclass(frozen=True)
+class DailyExchangeRate:
+    application_date: date
+    source_date: date
+    rate: Decimal
