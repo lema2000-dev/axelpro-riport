@@ -4,22 +4,25 @@ from tempfile import TemporaryDirectory
 
 from openpyxl import Workbook, load_workbook
 
-from axelpro_riport.models import Movement, DailyTotals, MonthlyTotals, ImportResult, DailyExchangeRate
-from axelpro_riport.excel_writer import (
-    add_processed_documents,
-    get_year_workbook_path,
-    read_processed_documents,
+from axelpro_riport.models import (
+    Movement,
+    DailyTotals,
+    MonthlyTotals,
+    ImportResult,
+    DailyExchangeRate,
 )
-from axelpro_riport.import_service import (
-    get_movement_years,
-    collect_processed_documents,
-    load_year_workbooks,
-    apply_import_result,
-    save_year_workbooks,
-    find_missing_exchange_rate_dates,
-    fill_missing_exchange_rates,
-    apply_exchange_rates,
-)
+from axelpro_riport.excel_documents import add_processed_documents
+from axelpro_riport.excel_files import get_year_workbook_path
+from axelpro_riport.excel_documents import read_processed_documents
+from axelpro_riport.report_service import get_movement_years
+from axelpro_riport.report_service import collect_processed_documents
+from axelpro_riport.report_service import load_year_workbooks
+from axelpro_riport.report_service import apply_import_result
+from axelpro_riport.report_service import save_year_workbooks
+from axelpro_riport.rate_logic import find_missing_exchange_rate_dates
+from axelpro_riport.rate_logic import fill_missing_exchange_rates
+from axelpro_riport.report_service import apply_exchange_rates
+
 
 def test_get_movement_years() -> None:
     movements = [
@@ -35,13 +38,14 @@ def test_get_movement_years() -> None:
         for day, document_number in [
             (date(2027, 1, 4), "SZ-2027/001"),
             (date(2026, 12, 30), "SZ-2026/001"),
-            (date(2026, 12, 31), "SZ-2026/002")
+            (date(2026, 12, 31), "SZ-2026/002"),
         ]
     ]
 
     assert get_movement_years(movements) == [2026, 2027]
     assert get_movement_years([]) == []
     print("Az árumozgásokhoz tartozó évek helyesen lettek meghatározva.")
+
 
 def test_collect_processed_documents() -> None:
     workbook_2026 = Workbook()
@@ -67,6 +71,7 @@ def test_collect_processed_documents() -> None:
         workbook_2027.close()
 
     print("A feldolgozott dokumentumok helyesen lettek összegyűjtve.")
+
 
 def test_load_year_workbooks() -> None:
     template_workbook = Workbook()
@@ -95,9 +100,7 @@ def test_load_year_workbooks() -> None:
             try:
                 existing.active.title = "Január"
                 existing["Január"]["B8"] = 1234
-                existing.save(
-                    get_year_workbook_path(directory, 2026)
-                )
+                existing.save(get_year_workbook_path(directory, 2026))
             finally:
                 existing.close()
 
@@ -119,24 +122,28 @@ def test_load_year_workbooks() -> None:
                 assert "Március" not in workbooks[2027].sheetnames
 
                 # Az új munkafüzet még csak a memóriában létezik.
-                assert not get_year_workbook_path(
-                    directory, 2027
-                ).exists()
+                assert not get_year_workbook_path(directory, 2027).exists()
 
             finally:
                 for workbook in workbooks.values():
                     workbook.close()
 
-            assert load_year_workbooks(
-                output_directory=directory,
-                template_sheet=template,
-                movements=[],
-            ) == {}
+            assert (
+                load_year_workbooks(
+                    output_directory=directory,
+                    template_sheet=template,
+                    movements=[],
+                )
+                == {}
+            )
 
     finally:
         template_workbook.close()
 
-    print("Az árumozgásokhoz tartozó éves munkafüzetek helyesen lettek betöltve vagy létrehozva.")
+    print(
+        "Az árumozgásokhoz tartozó éves munkafüzetek helyesen lettek betöltve vagy létrehozva."
+    )
+
 
 def test_apply_import_result() -> None:
     template_workbook = Workbook()
@@ -222,7 +229,10 @@ def test_apply_import_result() -> None:
             workbook.close()
         template_workbook.close()
 
-    print("Az új összegek és bizonylatkulcsok helyesen lettek beírva az éves riportokba.")
+    print(
+        "Az új összegek és bizonylatkulcsok helyesen lettek beírva az éves riportokba."
+    )
+
 
 def test_save_year_workbooks() -> None:
     workbooks = {
@@ -247,13 +257,13 @@ def test_save_year_workbooks() -> None:
             path = get_year_workbook_path(directory, 2026)
             untouched_path = get_year_workbook_path(directory, 2027)
 
-            backups = save_year_workbooks(
+            saved = save_year_workbooks(
                 output_directory=directory,
                 workbooks=workbooks,
                 result=result,
             )
 
-            assert backups == {2026: None}
+            assert saved is None
             assert path.exists()
             assert not untouched_path.exists()
 
@@ -266,24 +276,17 @@ def test_save_year_workbooks() -> None:
             finally:
                 loaded.close()
 
-            # Második mentés: a korábbi állapot másolatba kerül.
+            # Második mentés: a riport lecserélődik, másolat nem készül.
             workbooks[2026].active["B8"] = 2500
 
-            backups = save_year_workbooks(
+            saved = save_year_workbooks(
                 output_directory=directory,
                 workbooks=workbooks,
                 result=result,
             )
 
-            backup_path = backups[2026]
-            assert backup_path is not None
-            assert backup_path.exists()
-
-            backup = load_workbook(backup_path)
-            try:
-                assert backup.active["B8"].value == 1000
-            finally:
-                backup.close()
+            assert saved is None
+            assert not (path.parent / "backups").exists()
 
             loaded = load_workbook(path)
             try:
@@ -301,11 +304,14 @@ def test_save_year_workbooks() -> None:
                 new_documents=set(),
             )
 
-            assert save_year_workbooks(
-                output_directory=directory,
-                workbooks=workbooks,
-                result=empty_result,
-            ) == {}
+            assert (
+                save_year_workbooks(
+                    output_directory=directory,
+                    workbooks=workbooks,
+                    result=empty_result,
+                )
+                is None
+            )
 
             assert path.read_bytes() == previous_content
 
@@ -313,7 +319,10 @@ def test_save_year_workbooks() -> None:
         for workbook in workbooks.values():
             workbook.close()
 
-    print("Az új bizonylatokkal frissített éves riportok helyesen lettek mentve, a korábbi állapotok biztonsági másolatba kerültek.")
+    print(
+        "Az új bizonylatokkal frissített éves riportok helyesen lettek mentve, a riportok ideiglenes fájlon keresztül frissültek."
+    )
+
 
 def test_missing_exchange_rates() -> None:
     friday = date(2026, 10, 9)
@@ -362,9 +371,7 @@ def test_missing_exchange_rates() -> None:
 
     # Október 8-hoz nem használhatjuk a későbbi, október 9-i árfolyamot.
     assert earlier_day not in completed
-    assert find_missing_exchange_rate_dates(
-        movements, completed
-    ) == [earlier_day]
+    assert find_missing_exchange_rate_dates(movements, completed) == [earlier_day]
 
     # Az eredeti szótár változatlan.
     assert set(rates) == {friday}
@@ -382,7 +389,10 @@ def test_missing_exchange_rates() -> None:
 
     assert fill_missing_exchange_rates([sunday], {}) == {}
 
-    print("A hiányzó árfolyamok kiegészítése a legutóbbi ismert forrásdátummal helyesen történt.")
+    print(
+        "A hiányzó árfolyamok kiegészítése a legutóbbi ismert forrásdátummal helyesen történt."
+    )
+
 
 def test_apply_exchange_rates() -> None:
     workbooks = {
@@ -419,20 +429,18 @@ def test_apply_exchange_rates() -> None:
         assert apply_exchange_rates(workbooks, rates) == set()
 
         with TemporaryDirectory() as directory:
-            backups = save_year_workbooks(
+            saved = save_year_workbooks(
                 output_directory=directory,
                 workbooks=workbooks,
                 result=empty_result,
                 additional_years=changed_years,
             )
 
-            assert backups == {2026: None}
+            assert saved is None
 
             path = get_year_workbook_path(directory, 2026)
             assert path.exists()
-            assert not get_year_workbook_path(
-                directory, 2027
-            ).exists()
+            assert not get_year_workbook_path(directory, 2027).exists()
 
             loaded = load_workbook(path, data_only=False)
             try:
@@ -451,7 +459,10 @@ def test_apply_exchange_rates() -> None:
         for workbook in workbooks.values():
             workbook.close()
 
-    print("A havi árfolyamok helyesen lettek beírva az éves riportokba, a változások mentése és visszaállítása is megfelelően működött.")
+    print(
+        "A havi árfolyamok helyesen lettek beírva az éves riportokba, a változások mentése és visszaállítása is megfelelően működött."
+    )
+
 
 def run_all_tests() -> None:
     test_get_movement_years()
@@ -461,6 +472,7 @@ def run_all_tests() -> None:
     test_save_year_workbooks()
     test_missing_exchange_rates()
     test_apply_exchange_rates()
+
 
 if __name__ == "__main__":
     run_all_tests()

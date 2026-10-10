@@ -105,14 +105,15 @@ tárolását a későbbi modulok biztosítják.
 
 - A gép aktuális évének januárjától az aktuális hónapig terjedő, szükség esetén üres munkalapok létrehozása, a végleges havi sablon alkalmazása és az `Összesítő` kezdeti havi oszlopainak összekötése. A következő hónap és összesítő oszlop létrehozása az első oda tartozó CSV-tételnél; új évnél új éves munkafüzet januári kezdettel, régebbi év pótlásakor az érintett év saját fájljának bővítése. A dátumok, formázás és minden érintett képlet ellenőrzése.
 - Heti blokkok és havi záró képleteinek generálása a végleges mintából; az összesítő havi hivatkozásainak és a hónaponként egycellás Euro lapnak a létrehozása.
-- Csak a célcellák módosítása; a meglévő munkafüzet biztonsági másolatának készítése mentés előtt.
+- Csak a célcellák módosítása; mentés ugyanabban a mappában létrehozott ideiglenes fájlba, majd atomi fájlcsere. Biztonsági másolat nem készül.
 - Beállítások és az **összes eddig feldolgozott év–bizonylatszám pár** tartós helyi mentése; következetes működés újraindítás, átfedő export, több éves CSV és évváltás esetén. Külön reset művelet a teljes alkalmazásállapotra, az Excel-fájlok megőrzésével.
 
 **Jelenlegi állapot – részben kész**
 
-- **Kész:** a sablon betöltése; cellák, formázások és összevonások másolása; hónaphatáron rövidített heti blokkok és heti képletek; havi záró és képletei; havi Euro-cellák és az Összesítő hivatkozásai; éves munkafüzet létrehozása januártól a megadott hónapig, valamint bővítése a meglévő adatok megőrzésével.
-- **Hátravan:** a feldolgozott CSV-összegek célcellákba írása; a CSV dátuma szerinti éves fájl kiválasztása, létrehozása és bővítése; biztonsági másolat és biztonságos mentés; beállítások, árfolyamok és év–bizonylatszám párok tartós tárolása; összehangolt Excel- és állapotmentés; reset az Excel-fájlok megőrzésével.
-- **Ellenőrzés:** a generálási tesztek sikeresek; az adatbevitel, újraindítás és megszakított mentés próbái, valamint a képletek kiszámolt eredményeinek ellenőrzése még hátravannak.
+- **Kész:** heti/havi lapgenerálás és összesítő; napi és havi összegek beírása; éves riportok megnyitása és bővítése; rejtett bizonylat- és napi árfolyamnyilvántartás; havi árfolyamfrissítés a tárolt forrásdátumok alapján; import előkészítése, árfolyampótlás és összehangolt mentés az éves munkafüzeten belül. Biztonsági másolat helyett csak ideiglenes fájl és atomi csere van.
+- **Hátravan:** beállítások tárolása; első indítás felületi folyamata; reset; webes árfolyamlekérés és kézi beviteli ablak; lezárt hónapok árfolyamszabályának bekötése és az importtól független aktuális árfolyam tárolásának rendezése.
+- **Ellenőrzés:** a meglévő automatizált tesztek ellenőrzik a generálást, adatbevitelt, nyilvántartásokat és mentési hibát. A grafikus felület, a képletek Excelben számolt eredménye és a Windows-próba még hátravan.
+- **Több éves mentés:** a csere fájlonként atomi. Ha egy későbbi év mentése hibázik, új előkészítéssel kell újrapróbálni; a már elmentett bizonylatkulcsok kizárják a duplázást.
 
 ### 5. Grafikus felület és árfolyam
 

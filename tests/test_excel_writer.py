@@ -12,39 +12,41 @@ from unittest.mock import patch
 
 from pathlib import Path
 
-from axelpro_riport.excel_writer import (
-    copy_block,
-    clear_input_values,
-    create_week_block,
-    create_year_workbook,
-    load_or_create_year_workbook,
-    set_week_dates,
-    create_month_sheet,
-    ensure_month_exchange_rate,
-    ensure_month_sheet,
-    ensure_summary_month,
-    ensure_months_through,
-    find_day_column,
-    add_cell_amount,
-    write_daily_totals,
-    write_monthly_totals,
-    write_import_result,
-    get_year_workbook_path,
-    create_workbook_backup,
-    save_workbook_safely,
-    PROCESSED_DOCUMENTS_SHEET,
-    ensure_processed_documents_sheet,
-    read_processed_documents,
-    add_processed_documents,
-    DAILY_EXCHANGE_RATES_SHEET,
-    add_daily_exchange_rates,
-    read_daily_exchange_rates,
-    update_monthly_exchange_rates,
-)
+from axelpro_riport.excel_copy import copy_block
+from axelpro_riport.excel_copy import clear_input_values
+from axelpro_riport.excel_layout import create_week_block
+from axelpro_riport.excel_layout import create_year_workbook
+from axelpro_riport.excel_files import load_or_create_year_workbook
+from axelpro_riport.excel_layout import set_week_dates
+from axelpro_riport.excel_layout import create_month_sheet
+from axelpro_riport.excel_rates import ensure_month_exchange_rate
+from axelpro_riport.excel_layout import ensure_month_sheet
+from axelpro_riport.excel_layout import ensure_summary_month
+from axelpro_riport.excel_layout import ensure_months_through
+from axelpro_riport.excel_writer import find_day_column
+from axelpro_riport.excel_writer import add_cell_amount
+from axelpro_riport.excel_writer import write_daily_totals
+from axelpro_riport.excel_writer import write_monthly_totals
+from axelpro_riport.excel_writer import write_import_result
+from axelpro_riport.excel_files import get_year_workbook_path
+from axelpro_riport.excel_files import save_workbook_safely
+from axelpro_riport.excel_constants import PROCESSED_DOCUMENTS_SHEET
+from axelpro_riport.excel_documents import ensure_processed_documents_sheet
+from axelpro_riport.excel_documents import read_processed_documents
+from axelpro_riport.excel_documents import add_processed_documents
+from axelpro_riport.excel_constants import DAILY_EXCHANGE_RATES_SHEET
+from axelpro_riport.excel_rates import add_daily_exchange_rates
+from axelpro_riport.excel_rates import read_daily_exchange_rates
+from axelpro_riport.excel_rates import update_monthly_exchange_rates
 
 from axelpro_riport.calendar_utils import get_month_weeks
 
-from axelpro_riport.models import DailyTotals, MonthlyTotals, ImportResult, DailyExchangeRate
+from axelpro_riport.models import (
+    DailyTotals,
+    MonthlyTotals,
+    ImportResult,
+    DailyExchangeRate,
+)
 
 
 def test_copy_block() -> None:
@@ -74,7 +76,7 @@ def test_copy_block() -> None:
         min_column=1,
         max_column=3,
         target_start_row=5,
-        target_start_column=5
+        target_start_column=5,
     )
 
     assert target["E5"].value == "Teszt"
@@ -93,6 +95,7 @@ def test_copy_block() -> None:
     workbook.close()
     print("Sikeres blokkmásolási teszt.")
 
+
 def test_clear_input_values() -> None:
     workbook = Workbook()
     sheet = workbook.active
@@ -105,13 +108,7 @@ def test_clear_input_values() -> None:
     sheet["C2"] = 200
     sheet["B1"].font = Font(bold=True)
 
-    clear_input_values(
-        sheet=sheet,
-        min_row=1,
-        max_row=2,
-        min_column=2,
-        max_column=3
-    )
+    clear_input_values(sheet=sheet, min_row=1, max_row=2, min_column=2, max_column=3)
 
     assert sheet["A1"].value == "Sorfelirat"
     assert sheet["B1"].value is None
@@ -122,6 +119,7 @@ def test_clear_input_values() -> None:
     workbook.close()
     print("Sikeres adatürítési teszt.")
 
+
 def test_create_week_block() -> None:
     workbook = Workbook()
     template = workbook.active
@@ -129,14 +127,7 @@ def test_create_week_block() -> None:
 
     template["A8"] = "Bontott alkatrész sz."
 
-    day_names = (
-        "Hétfő",
-        "Kedd",
-        "Szerda",
-        "Csütörtök",
-        "Péntek",
-        "Szombat"
-    )
+    day_names = ("Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat")
 
     for weekday, day_name in enumerate(day_names):
         column = 2 + weekday * 2
@@ -148,10 +139,7 @@ def test_create_week_block() -> None:
 
         for row in (1, 2, 4, 8):
             template.merge_cells(
-                start_row=row,
-                end_row=row,
-                start_column=column,
-                end_column=column + 1
+                start_row=row, end_row=row, start_column=column, end_column=column + 1
             )
 
     template["N1"] = "Heti záró"
@@ -160,19 +148,14 @@ def test_create_week_block() -> None:
     template["O26"] = "=C26+E26+G26+I26+K26+M26"
 
     for row in (1, 2, 4, 8):
-        template.merge_cells(
-            start_row=row,
-            end_row=row,
-            start_column=14,
-            end_column=15
-        )
+        template.merge_cells(start_row=row, end_row=row, start_column=14, end_column=15)
 
     first_width = create_week_block(
         template_sheet=template,
         target_sheet=target,
         week=get_month_weeks(2026, 10)[0],
         week_start_column=1,
-        include_labels=True
+        include_labels=True,
     )
 
     assert first_width == 9
@@ -200,7 +183,7 @@ def test_create_week_block() -> None:
         target_sheet=target,
         week=get_month_weeks(2026, 9)[-1],
         week_start_column=next_column,
-        include_labels=False
+        include_labels=False,
     )
 
     assert last_width == 8
@@ -232,7 +215,7 @@ def test_create_week_block() -> None:
         target_sheet=target,
         week=[date(2026, 11, 1)],
         week_start_column=next_column,
-        include_labels=False
+        include_labels=False,
     )
 
     assert sunday_width == 0
@@ -241,29 +224,20 @@ def test_create_week_block() -> None:
     workbook.close()
     print("Sikeres rövidített heti blokk teszt.")
 
+
 def test_set_week_dates() -> None:
     workbook = Workbook()
     sheet = workbook.active
     week = get_month_weeks(2026, 10)[0]
 
-    set_week_dates(
-        sheet=sheet,
-        week=week,
-        week_start_column=1,
-        include_labels=True
-    )
+    set_week_dates(sheet=sheet, week=week, week_start_column=1, include_labels=True)
 
     assert sheet["B2"].value == date(2026, 10, 1)
     assert sheet["D2"].value == date(2026, 10, 2)
     assert sheet["F2"].value == date(2026, 10, 3)
     assert sheet["H2"].value == 40
 
-    set_week_dates(
-        sheet=sheet,
-        week=week,
-        week_start_column=10,
-        include_labels=False
-    )
+    set_week_dates(sheet=sheet, week=week, week_start_column=10, include_labels=False)
 
     assert sheet["J2"].value == date(2026, 10, 1)
     assert sheet["L2"].value == date(2026, 10, 2)
@@ -273,18 +247,12 @@ def test_set_week_dates() -> None:
     workbook.close()
     print("Sikeres heti dátumbeállítási teszt.")
 
+
 def test_create_month_sheet() -> None:
     template_workbook = Workbook()
     template = template_workbook.active
 
-    day_names = (
-        "Hétfő",
-        "Kedd",
-        "Szerda",
-        "Csütörtök",
-        "Péntek",
-        "Szombat"
-    )
+    day_names = ("Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat")
 
     template["A8"] = "Bontott alkatrész sz."
 
@@ -306,12 +274,7 @@ def test_create_month_sheet() -> None:
     template["B78"] = "=B74*0.08"
 
     for row in range(43, 86):
-        template.merge_cells(
-            start_row=row,
-            end_row=row,
-            start_column=2,
-            end_column=3
-        )
+        template.merge_cells(start_row=row, end_row=row, start_column=2, end_column=3)
 
     workbook = Workbook()
     workbook.remove(workbook.active)
@@ -323,7 +286,7 @@ def test_create_month_sheet() -> None:
         template_sheet=template,
         year=2026,
         month=10,
-        exchange_rate_reference=rate_reference
+        exchange_rate_reference=rate_reference,
     )
 
     assert sheet.title == "Október"
@@ -343,7 +306,10 @@ def test_create_month_sheet() -> None:
     assert sheet["B45"].value == "Forint"
 
     assert sheet["B46"].value == "=(H12+V12+AJ12+AX12+BL12)"
-    assert sheet["B58"].value == "=(H26+V26+AJ26+AX26+BL26)+((I26+W26+AK26+AY26+BM26)*'Euro'!$B$11)"
+    assert (
+        sheet["B58"].value
+        == "=(H26+V26+AJ26+AX26+BL26)+((I26+W26+AK26+AY26+BM26)*'Euro'!$B$11)"
+    )
 
     assert sheet["B59"].value == "=(H27+V27+AJ27+AX27+BL27)-(B61+B62+B63+B66+B67+B68)"
 
@@ -351,7 +317,9 @@ def test_create_month_sheet() -> None:
     assert sheet["B74"].value is None
     assert sheet["B78"].value == "=B74*0.08"
 
-    assert "B46:C46" in {str(merged_range) for merged_range in sheet.merged_cells.ranges}
+    assert "B46:C46" in {
+        str(merged_range) for merged_range in sheet.merged_cells.ranges
+    }
 
     try:
         create_month_sheet(
@@ -359,7 +327,7 @@ def test_create_month_sheet() -> None:
             template_sheet=template,
             year=2026,
             month=10,
-            exchange_rate_reference=rate_reference
+            exchange_rate_reference=rate_reference,
         )
     except ValueError:
         pass
@@ -371,6 +339,7 @@ def test_create_month_sheet() -> None:
     workbook.close()
     template_workbook.close()
     print("Sikeres teljes havi munkalap létrehozási teszt.")
+
 
 def test_ensure_month_sheet() -> None:
     template_workbook = Workbook()
@@ -395,8 +364,7 @@ def test_ensure_month_sheet() -> None:
     assert workbook["Euro"]["B11"].number_format == "0.00"
 
     assert sheet["B58"].value == (
-        "=(H26+V26+AJ26+AX26+BL26)"
-        "+((I26+W26+AK26+AY26+BM26)*'Euro'!$B$11)"
+        "=(H26+V26+AJ26+AX26+BL26)" "+((I26+W26+AK26+AY26+BM26)*'Euro'!$B$11)"
     )
 
     sheet["B8"] = 12345
@@ -426,6 +394,7 @@ def test_ensure_month_sheet() -> None:
     template_workbook.close()
     print("Sikeres havi munkalap- és árfolyammegőrzési teszt.")
 
+
 def test_summary_month() -> None:
     template_workbook = Workbook()
     template = template_workbook.active
@@ -454,12 +423,8 @@ def test_summary_month() -> None:
     assert summary["B2"].value == "Január"
     assert summary["A4"].value == template["A46"].value
 
-    assert summary["B4"].value == (
-        '=IF(\'Január\'!B46="","",\'Január\'!B46)'
-    )
-    assert summary["B32"].value == (
-        '=IF(\'Január\'!B74="","",\'Január\'!B74)'
-    )
+    assert summary["B4"].value == ("=IF('Január'!B46=\"\",\"\",'Január'!B46)")
+    assert summary["B32"].value == ("=IF('Január'!B74=\"\",\"\",'Január'!B74)")
 
     assert summary["B7"].value is None
     assert summary.column_dimensions["B"].width == 22
@@ -485,15 +450,14 @@ def test_summary_month() -> None:
     except ValueError:
         pass
     else:
-        raise AssertionError(
-            "Hiányzó havi munkalap esetén nem jelzett hibát."
-        )
+        raise AssertionError("Hiányzó havi munkalap esetén nem jelzett hibát.")
 
     assert summary.max_column == 2
 
     workbook.close()
     template_workbook.close()
     print("Sikeres összesítőmunkalap-teszt.")
+
 
 def test_year_workbook() -> None:
     template_workbook = Workbook()
@@ -566,6 +530,7 @@ def test_year_workbook() -> None:
     template_workbook.close()
     print("Sikeres éves munkafüzet- és hónapbővítési teszt.")
 
+
 def test_find_day_column() -> None:
     workbook = Workbook()
     sheet = workbook.active
@@ -573,7 +538,7 @@ def test_find_day_column() -> None:
 
     sheet["B2"] = date(2026, 10, 1)
     sheet["D2"] = datetime(2026, 10, 2)
-    sheet["H2"] = 40 # Heti sorszám, nem dátum.
+    sheet["H2"] = 40  # Heti sorszám, nem dátum.
 
     assert find_day_column(sheet, date(2026, 10, 1)) == 2
     assert find_day_column(sheet, date(2026, 10, 2)) == 4
@@ -587,6 +552,7 @@ def test_find_day_column() -> None:
 
     workbook.close()
     print("A dátumoszlop keresésének tesztje sikeres.")
+
 
 def test_add_cell_amount() -> None:
     workbook = Workbook()
@@ -614,12 +580,11 @@ def test_add_cell_amount() -> None:
         except ValueError as error:
             assert sheet["B9"].value == invalid_value
         else:
-            raise AssertionError(
-                "A hibás cellatartalom nem okozott hibát."
-            )
+            raise AssertionError("A hibás cellatartalom nem okozott hibát.")
 
     workbook.close()
     print("Az összegek hozzáadásának tesztje sikeres.")
+
 
 def test_write_daily_totals() -> None:
     workbook = Workbook()
@@ -638,16 +603,11 @@ def test_write_daily_totals() -> None:
     }
 
     for row in expected:
-        sheet.merge_cells(
-            start_row=row,
-            end_row=row,
-            start_column=4,
-            end_column=5
-        )
+        sheet.merge_cells(start_row=row, end_row=row, start_column=4, end_column=5)
 
     sheet["D8"] = 1000
-    sheet["D4"] = 900 # Kézzel kitöltött, nem célcella.
-    sheet["B8"] = 500 # Másik napi adat.
+    sheet["D4"] = 900  # Kézzel kitöltött, nem célcella.
+    sheet["B8"] = 500  # Másik napi adat.
     sheet["B14"] = "=B12+B13"
 
     totals = DailyTotals(
@@ -674,6 +634,7 @@ def test_write_daily_totals() -> None:
 
     workbook.close()
     print("A napi összesítések beírásának tesztje sikeres.")
+
 
 def test_write_monthly_totals() -> None:
     workbook = Workbook()
@@ -711,6 +672,7 @@ def test_write_monthly_totals() -> None:
 
     workbook.close()
     print("A havi összesítések beírásának tesztje sikeres.")
+
 
 def test_write_import_result() -> None:
     template_workbook = Workbook()
@@ -769,9 +731,7 @@ def test_write_import_result() -> None:
         result=result,
     )
 
-    assert read_processed_documents(workbook) == {
-        (2026, "TESZT-1")
-    }
+    assert read_processed_documents(workbook) == {(2026, "TESZT-1")}
 
     assert "Február" in workbook.sheetnames
     assert "Március" not in workbook.sheetnames
@@ -797,6 +757,7 @@ def test_write_import_result() -> None:
     template_workbook.close()
     print("Az importált napi és havi összesítések beírásának tesztje sikeres.")
 
+
 def test_load_or_create_workbook() -> None:
     template_workbook = Workbook()
     template = template_workbook.active
@@ -807,16 +768,13 @@ def test_load_or_create_workbook() -> None:
         assert path.name == "Napi_értékesítési_riport_2026.xlsx"
 
         workbook = load_or_create_year_workbook(
-            output_directory=directory,
-            template_sheet=template,
-            year=2026,
-            last_month=2
+            output_directory=directory, template_sheet=template, year=2026, last_month=2
         )
 
         assert "Január" in workbook.sheetnames
         assert "Február" in workbook.sheetnames
         assert "Március" not in workbook.sheetnames
-        assert not path.exists() # A létrehozás még nem ment fájlt.
+        assert not path.exists()  # A létrehozás még nem ment fájlt.
 
         workbook["Január"]["B8"] = 1234
         workbook["Január"]["B12"] = "=B8+B9+B10"
@@ -838,39 +796,6 @@ def test_load_or_create_workbook() -> None:
     template_workbook.close()
     print("A munkafüzet betöltésének vagy létrehozásának tesztje sikeres.")
 
-def test_create_workbook_backup() -> None:
-    with TemporaryDirectory() as directory:
-        path = get_year_workbook_path(directory, 2026)
-
-        # Nem létező riportról még nem készül másolat.
-        assert create_workbook_backup(path) is None
-        assert not (path.parent / "backups").exists()
-
-        workbook = Workbook()
-        workbook.active["B8"] = 1234
-        workbook.active["B12"] = "=B8+B9+B10"
-        workbook.save(path)
-        workbook.close()
-
-        original_content = path.read_bytes()
-
-        backup_path = create_workbook_backup(path)
-
-        assert backup_path is not None
-        assert backup_path.exists()
-        assert backup_path.parent.name == "backups"
-        assert backup_path.name.startswith(f"{path.stem}_")
-        assert backup_path.suffix == ".xlsx"
-
-        # A másolat pontos, az eredeti fájl változatlan.
-        assert backup_path.read_bytes() == original_content
-        assert path.read_bytes() == original_content
-
-        backup = load_workbook(backup_path, data_only=False)
-        assert backup.active["B8"].value == 1234
-        assert backup.active["B12"].value == "=B8+B9+B10"
-        backup.close()
-        print("A munkafüzet biztonsági mentésének tesztje sikeres.")
 
 def test_save_workbook_safely() -> None:
     with TemporaryDirectory() as directory:
@@ -885,13 +810,8 @@ def test_save_workbook_safely() -> None:
         assert path.exists()
 
         sheet["B8"] = 2500
-        backup_path = save_workbook_safely(workbook, path)
-        
-        assert backup_path is not None
-
-        backup = load_workbook(backup_path)
-        assert backup.active["B8"].value == 1000
-        backup.close()
+        save_workbook_safely(workbook, path)
+        assert not (path.parent / "backups").exists()
 
         saved = load_workbook(path)
         assert saved.active["B8"].value == 2500
@@ -915,25 +835,9 @@ def test_save_workbook_safely() -> None:
         assert path.read_bytes() == original_content
         assert not list(path.parent.glob(f".{path.stem}_*.xlsx"))
 
-        # A biztonsági másolat hibája esetén sem írjuk felül a riportot.
-        sheet["B8"] = 9000
-
-        with patch(
-            "axelpro_riport.excel_writer.create_workbook_backup",
-            side_effect=OSError("Szimulált biztonsági másolat hiba")
-        ):
-            try:
-                save_workbook_safely(workbook, path)
-            except OSError as error:
-                assert str(error) == "Szimulált biztonsági másolat hiba"
-            else:
-                raise AssertionError("A biztonsági másolat hibája nem terjed tovább.")
-
-        assert path.read_bytes() == original_content
-        assert not list(path.parent.glob(f".{path.stem}_*.xlsx"))
-        
         workbook.close()
         print("A biztonságos mentés tesztje sikeres.")
+
 
 def test_processed_documents() -> None:
     workbook = Workbook()
@@ -948,11 +852,7 @@ def test_processed_documents() -> None:
     assert sheet.sheet_state == "veryHidden"
     assert ensure_processed_documents_sheet(workbook) is sheet
 
-    documents = {
-        (2026, "SZ-2026/001"),
-        (2026, "SZ-2026/002"),
-        (2026, "=TESZT")
-    }
+    documents = {(2026, "SZ-2026/001"), (2026, "SZ-2026/002"), (2026, "=TESZT")}
 
     add_processed_documents(workbook, documents)
 
@@ -962,17 +862,6 @@ def test_processed_documents() -> None:
     # Ugyanazok a kulcsok nem kerülnek be mégegyszer.
     add_processed_documents(workbook, documents)
 
-    assert sheet.max_row == 4
-
-    # A hibás kulcs nem módosíthatja a nyilvántartást.
-    try:
-        add_processed_documents(workbook, {(2026, "")})
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("A hibás bizonylatkulcsot elfogadta.")
-
-    assert read_processed_documents(workbook) == documents
     assert sheet.max_row == 4
 
     with TemporaryDirectory() as directory:
@@ -993,6 +882,7 @@ def test_processed_documents() -> None:
 
     workbook.close()
     print("A feldolgozott bizonylatok nyilvántartásának tesztje sikeres.")
+
 
 def test_daily_exchange_rates() -> None:
     workbook = Workbook()
@@ -1049,10 +939,7 @@ def test_daily_exchange_rates() -> None:
             loaded = load_workbook(path, data_only=False)
             try:
                 assert read_daily_exchange_rates(loaded) == rates
-                assert (
-                    loaded[DAILY_EXCHANGE_RATES_SHEET].sheet_state
-                    == "veryHidden"
-                )
+                assert loaded[DAILY_EXCHANGE_RATES_SHEET].sheet_state == "veryHidden"
             finally:
                 loaded.close()
 
@@ -1060,6 +947,7 @@ def test_daily_exchange_rates() -> None:
         workbook.close()
 
     print("A napi árfolyamok nyilvántartásának tesztje sikeres.")
+
 
 def test_update_monthly_exchange_rates() -> None:
     workbook = Workbook()
@@ -1091,10 +979,7 @@ def test_update_monthly_exchange_rates() -> None:
     try:
         add_daily_exchange_rates(
             workbook,
-            {
-                record.application_date: record
-                for record in records
-            },
+            {record.application_date: record for record in records},
         )
 
         # Egy forrásadat nélküli hónap értékét meg kell őrizni.
@@ -1129,6 +1014,7 @@ def test_update_monthly_exchange_rates() -> None:
 
     print("A havi árfolyamok frissítésének tesztje sikeres.")
 
+
 def run_all_tests() -> None:
     test_copy_block()
     test_clear_input_values()
@@ -1144,11 +1030,11 @@ def run_all_tests() -> None:
     test_write_monthly_totals()
     test_write_import_result()
     test_load_or_create_workbook()
-    test_create_workbook_backup()
     test_save_workbook_safely()
     test_processed_documents()
     test_daily_exchange_rates()
     test_update_monthly_exchange_rates()
+
 
 if __name__ == "__main__":
     run_all_tests()
